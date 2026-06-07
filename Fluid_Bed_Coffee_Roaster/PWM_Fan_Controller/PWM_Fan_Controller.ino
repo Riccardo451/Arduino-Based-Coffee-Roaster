@@ -21,34 +21,28 @@
 #define SCREEN_ADDRESS 0x3C
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-const int displayInterval = 30; // ms (~33 FPS)
+const uint8_t displayInterval = 30; // ms (~33 FPS)
 
 // ---------------- Encoder ----------------
-#define inputCLK 2  // Best on Interrupt pin
-#define inputDT 3   // Best on Interrupt pin
+#define inputCLK 2  // Interrupt pin
+#define inputDT 3   // Interrupt pin
 #define inputSW A3
 
 // Initialize the Encoder
 Encoder myEnc(inputCLK, inputDT);
 
-// Tracking raw positions instead of forced grids
-long lastRawPosition = 0;
-unsigned long lastEncoderMoveTime = 0;
-const unsigned long encoderDebounceDelay = 10; // ms to ignore contact bounce noise
+// Base state tracking matching the basic example design
+long oldPosition = 0;
 
-// ---------------- PWM ----------------
+// ---------------- PWM & State ----------------
 #define FAN_PWM 9
 
-int pwmPercent = 75;
-int stepSize = 5;
+int8_t pwmPercent = 75;
+int8_t stepSize = 5;
 
 // ---------------- Display cache ----------------
-int oldPWM = -1;
-int oldStep = -1;
-
-// ---------------- Encoder state ----------------
-int Length = 75; // maps to PWM (0–100)
-int oldLength = -1;
+int8_t oldPWM = -1;
+int8_t oldStep = -1;
 
 void setup() {
   #if DEBUG
@@ -61,6 +55,7 @@ void setup() {
   // Pullup on Encoder pins
   pinMode(inputCLK, INPUT_PULLUP);
   pinMode(inputDT, INPUT_PULLUP);
+  pinMode(inputSW, INPUT_PULLUP);
  
   // OLED
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -73,16 +68,12 @@ void setup() {
   display.clearDisplay();
   display.display();
 
-  // Encoder Switch
-  pinMode(inputSW, INPUT_PULLUP);
-
-  // PWM
+  // PWM Setup
   pinMode(FAN_PWM, OUTPUT);
   analogWrite(FAN_PWM, map(pwmPercent, 0, 100, 0, 255));
 
-  // Initialize Encoder position internal state
+  // Sync baseline to 0
   myEnc.write(0);
-  lastRawPosition = 0;
 
   // Draw static header once
   display.setTextSize(1);
@@ -107,32 +98,29 @@ void loop() {
 
 // ---------------- Encoder ----------------
 void readEncoder() {
-  long currentRawPosition = myEnc.read();
-  long change = currentRawPosition - lastRawPosition;
-
-  // Change threshold: Cheap encoders change by 2 units per physical click. 
-  // If yours is still slightly sluggish, you can change '2' to '1' below.
-  if (abs(change) >= 2) {
-    unsigned long now = millis();
-
-    if (now - lastEncoderMoveTime > encoderDebounceDelay) {
+  long newPosition = myEnc.read();
+  
+  if (newPosition != oldPosition) {
+    // Calculate how many raw counts the library has moved
+    long clicks = (newPosition - oldPosition);
+    
+    // NOTE: Change the '2' below to '4' if your basic test code 
+    // shows increments of 4 units per physical click on the Serial monitor.
+    if (abs(clicks) >= 2) { 
       
-      if (change > 0) {
-        Length += stepSize;
+      if (clicks > 0) {
+        pwmPercent += stepSize;
         DEBUG_PRINTLN("CW rotation");
       } else {
-        Length -= stepSize;
+        pwmPercent -= stepSize;
         DEBUG_PRINTLN("CCW rotation");
       }
 
-      // Keep within bounds
-      Length = constrain(Length, 0, 100);
+      // Keep within hardware boundaries
+      pwmPercent = constrain(pwmPercent, 0, 100);
       
-      lastEncoderMoveTime = now;
-      lastRawPosition = currentRawPosition; // Update baseline tracking
-    } else {
-      // If it was noise within the debounce window, reset encoder to suppress it
-      myEnc.write(lastRawPosition);
+      // Update our baseline position to the current state cleanly
+      oldPosition = newPosition; 
     }
   }
 }
@@ -155,22 +143,23 @@ void handleButton() {
 
 // ---------------- PWM update ----------------
 void updateFan() {
-  if (Length != pwmPercent) {
-    pwmPercent = Length;
+  static int8_t lastAppliedPWM = -1; 
+  
+  if (pwmPercent != lastAppliedPWM) {
+    lastAppliedPWM = pwmPercent;
     analogWrite(FAN_PWM, map(pwmPercent, 0, 100, 0, 255));
   }
 }
 
 // ---------------- OLED ----------------
 void printToDisplay() {
-  if (Length != oldLength || stepSize != oldStep) {
+  if (pwmPercent != oldPWM || stepSize != oldStep) {
 
-    oldLength = Length;
+    oldPWM = pwmPercent;
     oldStep = stepSize;
 
-    // Only clear small regions (not full screen)
-    display.fillRect(0, 14, 128, 18, SSD1306_BLACK);  // value area
-    display.fillRect(0, 24, 128, 8, SSD1306_BLACK);   // step area
+    display.fillRect(75, 14, 53, 16, SSD1306_BLACK);  // Value area
+    display.fillRect(35, 24, 40, 8, SSD1306_BLACK);   // Step area
 
     display.setTextColor(SSD1306_WHITE);
 
