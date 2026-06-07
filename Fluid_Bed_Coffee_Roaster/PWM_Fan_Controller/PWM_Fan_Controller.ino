@@ -49,7 +49,8 @@ void setup() {
   Serial.begin(9600);
   DEBUG_PRINTLN("System starting...");
   #endif
-
+  // Add this inside your void setup() to alter Timer 1 (affecting Pins 9 and 10)
+  //TCCR1B = (TCCR1B & 0b11111000) | 0x01; // Sets PWM frequency to 31.372 kHz
   Wire.setClock(400000); // 400kHz fast mode
 
   // Pullup on Encoder pins
