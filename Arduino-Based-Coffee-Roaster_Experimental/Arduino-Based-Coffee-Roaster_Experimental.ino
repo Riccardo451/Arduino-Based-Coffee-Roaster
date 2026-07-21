@@ -1,28 +1,75 @@
-// Fluid Bed Coffee Roaster Arduino Sketch made by Henrik Balle Koefoed v. 12. january 2019
+/*
+  ============================================================================
+  Fluid Bed Coffee Roaster Controller
+  ============================================================================
+  This sketch controls a fluid bed coffee roaster using an Arduino, a MAX6675
+  thermocouple interface, and Modbus RTU communications for integration with
+  Artisan or other roasting software.
 
+  Main functions
+  --------------
+  • Reads Bean Temperature (BT) from a K-type thermocouple via MAX6675.
+  • Publishes BT through Modbus holding register au16data[2] (°C ×100).
+  • Receives fan and heater commands from Modbus.
+  • Controls:
+      - Fan speed using PWM with a configurable acceleration ramp.
+      - Heater power using time-proportional (pulse) control of a Solid State
+        Relay (SSR).
+
+  Temperature acquisition
+  -----------------------
+  • Samples the MAX6675 every 250 ms, matching its conversion rate.
+  • Rejects invalid readings (NaN, negative values, or temperatures outside the
+    configured operating range).
+  • Rejects unrealistic temperature jumps to reduce the effect of SPI glitches
+    or electrical noise.
+  • Uses a 4-sample circular moving average (1 second window) to provide stable
+    temperature feedback while maintaining low computational overhead.
+  • Temperature values are stored and transmitted as degrees Celsius ×100
+    (e.g. 185.25°C = 18525).
+
+  Heater control
+  --------------
+  Heater output is generated using pulse-width time proportional control
+  (1-second repetition period). The requested heat level (0–99%) determines the
+  ON/OFF ratio of the SSR within each cycle.
+
+  Fan control
+  -----------
+  Fan speed is controlled by PWM and changes gradually using an acceleration
+  ramp to reduce mechanical stress and avoid sudden airflow changes.
+
+  Safety features
+  ---------------
+  • Heater is disabled when heat demand is zero.
+  • Heater is enabled only if:
+      - Fan speed is above 25%.
+      - Bean temperature is below 260°C.
+  • Fan speed is automatically maintained at a minimum of 25% whenever bean
+    temperature exceeds 120°C.
+  • Invalid temperature measurements are ignored, preventing transient sensor
+    errors from affecting heater control.
+
+  Modbus registers
+  ----------------
+  au16data[2] : Bean Temperature (BT) in °C ×100
+  au16data[4] : Heater command (0–99%)
+  au16data[5] : Fan command (0–99%)
+
+  Original project:
+    Henrik Balle Koefoed (2019)
+
+  Subsequent modifications:
+    - Improved temperature acquisition and validation.
+    - Reduced measurement latency.
+    - Added robust filtering and fault rejection.
+  ============================================================================
+*/
+
+// Based on: Fluid Bed Coffee Roaster Arduino Sketch made by Henrik Balle Koefoed v. 12. january 2019
 // Change to temperatur reading subroutine for higher data quality on temperatur v. 30. september 2019
 // http://www.sinobi.dk/henrik/kafferister1/cofferoaster.ino
 // http://www.sinobi.dk/henrik/coffeeroaster1/
-
-/*
-  CHANGELOG Riccardo
-  =========
-  Temperature handling update:
-
-  - Removed 8-sample moving average filtering to reduce PID latency.
-  - Temperature is now sampled every 250 ms, matching MAX6675 response capability.
-  - Added validation of MAX6675 readings:
-      * Reject NaN values.
-      * Reject values outside valid temperature range.
-      * Reject unrealistic temperature jumps between samples.
-  - Invalid readings are ignored and the last valid temperature is kept.
-  - Modbus register au16data[2] now contains the latest validated temperature.
-  - Temperature remains scaled as °C x100 for Artisan compatibility.
-
-  Result:
-  - Reduced temperature feedback delay from approximately 1.5 s to ~250-300 ms.
-  - Improved response time for Artisan PID control while maintaining fault protection.
-*/
 
 // Links to external libraries
 // https://github.com/adafruit/MAX6675-library
@@ -61,15 +108,21 @@ unsigned long EndPauseTime;
 
 //////////////////////////////////////////////
 // Temperature acquisition settings
-const unsigned long TEMP_SAMPLE_INTERVAL_MS = 250;
+const unsigned long TEMP_SAMPLE_INTERVAL_MS = 250;  // 250ms sample interval 
 
-// Temperature validation limits (stored as °C x100)
-const uint16_t TEMP_MIN_VALID = 100;       // 1.00 °C
-const uint16_t TEMP_MAX_VALID = 35000;     // 350.00 °C
+// Temperature validation limits (°C x100)
+const uint16_t TEMP_MIN_VALID = 500;      // 5.00 °C
+const uint16_t TEMP_MAX_VALID = 35000;    // 350.00 °C
 
-// Maximum allowed temperature change between samples
-// MAX6675 + thermocouple cannot physically jump this fast
-const uint16_t TEMP_MAX_STEP = 700;       // 7.00 °C -> 7°C / 0.25s = 28°C/s
+// Maximum allowed change between consecutive valid samples
+const uint16_t TEMP_MAX_STEP = 1000;      // 10.00 °C
+
+const uint8_t TEMP_SAMPLES = 4;  // 4 Samples * 250ms = 1 second to rotate the buffer
+
+uint16_t tempBuffer[TEMP_SAMPLES];
+uint32_t tempSum = 0;
+uint8_t tempIndex = 0;
+bool tempBufferInitialized = false;
 
 uint16_t lastValidTemp = 0;
 //////////////////////////////////////////////
@@ -95,42 +148,67 @@ void loop() {
 
 void tempReading()
 {
-  if (millis() - tempTime >= TEMP_SAMPLE_INTERVAL_MS)
-  {
+    if (millis() - tempTime < TEMP_SAMPLE_INTERVAL_MS)
+        return;
+
     tempTime = millis();
 
     float temperatureC = thermocoupleBT.readCelsius();
 
     // Reject invalid MAX6675 readings
-    if (isnan(temperatureC) || temperatureC < 0)
-    {
+    if (isnan(temperatureC) || temperatureC < 0.0f)
         return;
-    }
 
-    uint16_t temperature = (uint16_t)(temperatureC * 100.0);
+    uint16_t temperature = (uint16_t)(temperatureC * 100.0f);
 
-    // Reject zero and impossible temperatures
+    // Reject impossible temperatures
     if (temperature < TEMP_MIN_VALID ||
         temperature > TEMP_MAX_VALID)
-    {
-      return;
-    }
+        return;
 
     // Reject unrealistic jumps
     if (lastValidTemp != 0)
     {
-      uint16_t difference = abs((int)temperature - (int)lastValidTemp);
+        uint16_t difference = abs((int)temperature - (int)lastValidTemp);
 
-      if (difference > TEMP_MAX_STEP)
-      {
-        return;
-      }
+        static uint8_t invalidCount = 0;
+
+        if (difference > TEMP_MAX_STEP)
+        {
+            invalidCount++;
+
+            if (invalidCount < 3)
+                return;
+        }
+
+        invalidCount = 0;
     }
 
-    // Valid reading: update stored value
+    // Store latest valid reading
     lastValidTemp = temperature;
-    au16data[2] = temperature;
-  }
+
+    if (!tempBufferInitialized)
+    {
+        // Fill the whole buffer with the first valid reading
+        for (uint8_t i = 0; i < TEMP_SAMPLES; i++)
+            tempBuffer[i] = temperature;
+
+        tempSum = (uint32_t)temperature * TEMP_SAMPLES;
+        tempBufferInitialized = true;
+    }
+    else
+    {
+        // Running average using circular buffer
+        tempSum -= tempBuffer[tempIndex];
+        tempBuffer[tempIndex] = temperature;
+        tempSum += temperature;
+
+        tempIndex++;
+        if (tempIndex >= TEMP_SAMPLES)
+            tempIndex = 0;
+    }
+
+    au16data[2] = tempSum / TEMP_SAMPLES;
 }
 
 
