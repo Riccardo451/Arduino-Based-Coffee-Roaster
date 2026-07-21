@@ -1,7 +1,28 @@
 // Fluid Bed Coffee Roaster Arduino Sketch made by Henrik Balle Koefoed v. 12. january 2019
+
 // Change to temperatur reading subroutine for higher data quality on temperatur v. 30. september 2019
 // http://www.sinobi.dk/henrik/kafferister1/cofferoaster.ino
 // http://www.sinobi.dk/henrik/coffeeroaster1/
+
+/*
+  CHANGELOG Riccardo
+  =========
+  Temperature handling update:
+
+  - Removed 8-sample moving average filtering to reduce PID latency.
+  - Temperature is now sampled every 250 ms, matching MAX6675 response capability.
+  - Added validation of MAX6675 readings:
+      * Reject NaN values.
+      * Reject values outside valid temperature range.
+      * Reject unrealistic temperature jumps between samples.
+  - Invalid readings are ignored and the last valid temperature is kept.
+  - Modbus register au16data[2] now contains the latest validated temperature.
+  - Temperature remains scaled as °C x100 for Artisan compatibility.
+
+  Result:
+  - Reduced temperature feedback delay from approximately 1.5 s to ~250-300 ms.
+  - Improved response time for Artisan PID control while maintaining fault protection.
+*/
 
 // Links to external libraries
 // https://github.com/adafruit/MAX6675-library
