@@ -42,8 +42,8 @@ int thermoBtCS = 10;
 int thermoBtCLK = 13;
 MAX6675 thermocoupleBT(thermoBtCLK, thermoBtCS, thermoBtDO);
 
-int heatSSR = 4;
-int fanFET = 5;                                             // Pin 5 or 6 are better for PWM control of DC motors as the frequency is 980 Hz, as opposed to just 490 Hz
+const uint8_t heatSSR = 4;
+const uint8_t fanFET = 5;                                          // Pin 5 or 6 are better for PWM control of DC motors as the frequency is 980 Hz, as opposed to just 490 Hz
 
 unsigned long tempTime=0;
 
