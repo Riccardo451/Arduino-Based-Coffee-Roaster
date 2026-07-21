@@ -25,8 +25,6 @@ int heatSSR = 4;
 int fanFET = 5;                                             // Pin 5 or 6 are better for PWM control of DC motors as the frequency is 980 Hz, as opposed to just 490 Hz
 
 unsigned long tempTime=0;
-unsigned long longTemp[8];
-unsigned long avgTemp;
 
 const int FANaccelTime=1200;                                // Acceleration ramp time for FAN speed increase or decrease in milliseconds. Default 1500 mS
 int FANspeedmapped;
@@ -50,7 +48,7 @@ const uint16_t TEMP_MAX_VALID = 35000;     // 350.00 °C
 
 // Maximum allowed temperature change between samples
 // MAX6675 + thermocouple cannot physically jump this fast
-const uint16_t TEMP_MAX_STEP = 1500;       // 15.00 °C
+const uint16_t TEMP_MAX_STEP = 700;       // 7.00 °C -> 7°C / 0.25s = 28°C/s
 
 uint16_t lastValidTemp = 0;
 //////////////////////////////////////////////
