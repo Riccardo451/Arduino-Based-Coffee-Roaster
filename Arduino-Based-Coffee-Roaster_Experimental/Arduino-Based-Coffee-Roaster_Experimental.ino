@@ -100,9 +100,9 @@ void tempReading()
     float temperatureC = thermocoupleBT.readCelsius();
 
     // Reject invalid MAX6675 readings
-    if (isnan(temperatureC))
+    if (isnan(temperatureC) || temperatureC < 0)
     {
-      return;
+        return;
     }
 
     uint16_t temperature = (uint16_t)(temperatureC * 100.0);
