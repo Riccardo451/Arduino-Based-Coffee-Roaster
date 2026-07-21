@@ -141,12 +141,12 @@ void setFAN(int FANspeed){
     oldFANspeedmapped = FANspeedmapped;
     if(FANspeedmapped > actualFANspeed){                    // Things to do when motor has to speed up
       accel=FANspeedmapped - actualFANspeed;                // How far away are the motor from desired speed
-      accel=map(accel,100,255,1,3);                         // Reduce speed delta to individual increments between 1 and 3
+      accel = constrain(map(accel,0,255,1,3),1,3);                         // Reduce speed delta to individual increments between 1 and 3
       if(actualFANspeed+accel>FANspeedmapped){accel=0;}     // Unless motor allready has more or less reached target
     }
     else{                                                   // Things to do when motor has to slow down
       accel=actualFANspeed-FANspeedmapped;                  // How far away are the motor from desired speed
-      accel=map(accel,100,255,-1,-3);                       // Reduce speed delta to individual decrements between 1 and 3
+      accel = constrain(map(accel,0,255,-1,-3),-3,-1);                    // Reduce speed delta to individual decrements between 1 and 3
       if(actualFANspeed+accel<FANspeedmapped){accel=0;}     // Unless motor allready has more or less reached target
     }
     nextFANrampTime = millis();
