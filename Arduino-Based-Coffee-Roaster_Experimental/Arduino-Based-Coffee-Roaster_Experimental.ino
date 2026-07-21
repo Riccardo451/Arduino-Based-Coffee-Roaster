@@ -77,6 +77,8 @@ uint16_t lastValidTemp = 0;
 void setup() {
   pinMode(heatSSR, OUTPUT);
   pinMode(fanFET, OUTPUT);
+  digitalWrite(heatSSR, LOW);
+  analogWrite(fanFET,0);
   slave = Modbus(1,0,0);                                    // this is slave @1 and RS-232 or USB-FTDI
   slave.begin( 19200 );                                     // 19200 baud, 8-bits, non, 1-bit stop
   delay(500);
