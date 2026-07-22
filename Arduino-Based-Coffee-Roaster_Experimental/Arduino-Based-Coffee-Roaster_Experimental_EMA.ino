@@ -1,23 +1,81 @@
 /*
-MAX6675
-      │
-      ▼
-NaN/Open detection
-      │
-      ▼
-Median of 3
-      │
-      ▼
-Rate-of-change limiter
-      │
-      ▼
-EMA (15/16)
-      │
-      ▼
-Hysteresis
-      │
-      ▼
-Modbus register
+===============================================================================
+SYSTEM OVERVIEW
+===============================================================================
+
+                         +----------------+
+                         |   Artisan /    |
+                         |   MODBUS RTU   |
+                         +-------+--------+
+                                 |
+                                 |
+                         au16data[] array
+                                 |
+              +------------------+------------------+
+              |                                     |
+              v                                     v
+       +-------------+                       +-------------+
+       | Fan Control |                       | Heat Control|
+       +-------------+                       +-------------+
+              |                                     |
+              v                                     v
+          PWM FAN                              SSR HEATER
+
+
+Temperature Feedback Path:
+
+        +-------------+
+        |  MAX6675    |
+        | Thermocouple|
+        +------+------+
+               |
+               v
+        Read every 250ms
+               |
+               v
+        NaN / Fault Check
+               |
+               v
+        Range Validation
+               |
+               v
+        Rate-of-change Filter
+               |
+               v
+        EMA Low Pass Filter
+               |
+               v
+        Hysteresis Filter
+               |
+               v
+        Modbus Register
+        au16data[2]
+
+
+===============================================================================
+*/
+
+/*
+===============================================================================
+MODBUS REGISTER MAP
+
+Register | Function
+---------+-------------------------
+[0]      | Reserved
+[1]      | Reserved
+[2]      | Bean temperature x100°C
+[3]      | Reserved
+[4]      | Heater command 0-99%
+[5]      | Fan command 0-99%
+[6]      | Reserved
+[14]     | Modbus parameter
+[15]     | Modbus parameter
+
+Temperature example:
+2500 = 25.00°C
+18000 = 180.00°C
+
+===============================================================================
 */
 
 #include "max6675.h"
@@ -159,45 +217,20 @@ void tempReading()
         return;
 
     //---------------------------------------------------------------------
-    // Median-of-3 filter
+        // Reject impossible jumps
     //---------------------------------------------------------------------
 
-    medianBuffer[medianIndex] = temperature;
-
-    medianIndex++;
-
-    if (medianIndex >= 3)
-    {
-        medianIndex = 0;
-        medianReady = true;
-    }
-
-    if (!medianReady)
-        return;
-
-    temperature = median3(
-        medianBuffer[0],
-        medianBuffer[1],
-        medianBuffer[2]);
-
-    //---------------------------------------------------------------------
-    // Rate limiter
-    //---------------------------------------------------------------------
-
-    if (hasRawTemp)
-    {
-        int16_t delta =
-            (int16_t)temperature - (int16_t)lastRawTemp;
-
-        if (delta > TEMP_MAX_STEP)
-            temperature = lastRawTemp + TEMP_MAX_STEP;
-
-        else if (delta < -TEMP_MAX_STEP)
-            temperature = lastRawTemp - TEMP_MAX_STEP;
-    }
-
-    lastRawTemp = temperature;
-    hasRawTemp = true;
+      
+       if (hasRawTemp)
+      {
+          int16_t delta =
+              (int16_t)temperature - (int16_t)lastRawTemp;
+      
+          if (abs(delta) > TEMP_MAX_STEP)
+              return;
+      }
+      
+      lastRawTemp = temperature;
 
     //---------------------------------------------------------------------
     // EMA (15/16)
@@ -210,7 +243,7 @@ void tempReading()
     }
     else
     {
-        emaTemp += (temperature - emaTemp) >> 1; // smoothing factor of 1/2^N ->  >> 1 Fast, >> 5 Slow filter
+        emaTemp += (3*(temperature - emaTemp)) >> 2; // smoothing factor of 1/2^N ->  >> 1 Fast, >> 5 Slow filter
     }
 
     uint16_t filteredTemp = (uint16_t)emaTemp;
