@@ -210,7 +210,7 @@ void tempReading()
     }
     else
     {
-        emaTemp += (temperature - emaTemp) >> 3; // >> 1 Fast Filter and rapid changes, >> 5 Slow filter high Smoothness
+        emaTemp += (temperature - emaTemp) >> 3; // smoothing factor of 1/2^N ->  >> 1 Fast, >> 5 Slow filter
     }
 
     uint16_t filteredTemp = (uint16_t)emaTemp;
